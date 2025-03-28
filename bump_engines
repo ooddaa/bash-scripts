@@ -1,0 +1,179 @@
+#!/usr/bin/env node
+
+const fs = require('fs');
+const path = require('path');
+
+/**
+ * Recursively finds all package.json files and updates engine versions
+ * @param {string} directoryPath - Directory to scan
+ * @param {object} options - Options containing versions to update
+ * @param {string} [options.node] - New Node.js version to set
+ * @param {string} [options.pnpm] - New PNPM version to set
+ */
+function bumpEngineVersions(directoryPath, options) {
+  // Get the absolute path
+  const absolutePath = path.resolve(directoryPath);
+
+  // Check if the directory exists
+  if (!fs.existsSync(absolutePath)) {
+    console.error(`Error: Directory ${absolutePath} does not exist`);
+    process.exit(1);
+  }
+
+  // Validate that at least one version is provided
+  if (!options.node && !options.pnpm) {
+    console.error('Error: Please provide at least one version to update (--node or --pnpm)');
+    process.exit(1);
+  }
+
+  // Start recursive search
+  processDirectory(absolutePath, options);
+
+  console.log('Done! All package.json files have been processed.');
+}
+
+/**
+ * Process a directory recursively
+ * @param {string} directoryPath - Directory to process
+ * @param {object} options - Options containing versions to update
+ */
+function processDirectory(directoryPath, options) {
+  try {
+    const items = fs.readdirSync(directoryPath);
+
+    // Check for package.json in current directory
+    if (items.includes('package.json')) {
+      processPackageJson(path.join(directoryPath, 'package.json'), options);
+    }
+
+    // Process subdirectories
+    for (const item of items) {
+      const itemPath = path.join(directoryPath, item);
+      const stats = fs.statSync(itemPath);
+
+      // Skip node_modules directories to avoid excessive processing
+      if (item === 'node_modules') {
+        continue;
+      }
+
+      // Recursively process subdirectories
+      if (stats.isDirectory()) {
+        processDirectory(itemPath, options);
+      }
+    }
+  } catch (error) {
+    console.error(`Error reading directory ${directoryPath}: ${error.message}`);
+  }
+}
+
+/**
+ * Process a package.json file
+ * @param {string} filePath - Path to package.json file
+ * @param {object} options - Options containing versions to update
+ */
+function processPackageJson(filePath, options) {
+  try {
+    // Read and parse the package.json file
+    const packageData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+
+    // Ensure engines object exists
+    if (!packageData.engines) {
+      packageData.engines = {};
+    }
+
+    let updated = false;
+    let changes = [];
+
+    // Update Node.js version if specified
+    if (options.node && (packageData.engines.node !== options.node)) {
+      const originalVersion = packageData.engines.node || 'not set';
+      packageData.engines.node = options.node;
+      changes.push(`node: "${originalVersion}" → "${options.node}"`);
+      updated = true;
+    }
+
+    // Update PNPM version if specified
+    if (options.pnpm && (packageData.engines.pnpm !== options.pnpm)) {
+      const originalVersion = packageData.engines.pnpm || 'not set';
+      packageData.engines.pnpm = options.pnpm;
+      changes.push(`pnpm: "${originalVersion}" → "${options.pnpm}"`);
+      updated = true;
+    }
+
+    // Only write the file if changes were made
+    if (updated) {
+      // Write the updated package.json back to disk
+      fs.writeFileSync(filePath, JSON.stringify(packageData, null, 2) + '\n');
+      console.log(`Updated ${filePath}:`);
+      changes.forEach(change => console.log(`  - ${change}`));
+    }
+  } catch (error) {
+    console.error(`Error processing ${filePath}: ${error.message}`);
+  }
+}
+
+/**
+ * Parse command line arguments
+ * @returns {object} Parsed arguments
+ */
+function parseArgs() {
+  const args = process.argv.slice(2);
+  const result = { directory: null, node: null, pnpm: null };
+
+  // First argument that isn't a flag is the directory
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (arg === '--node' && i + 1 < args.length) {
+      result.node = args[++i];
+    } else if (arg === '--pnpm' && i + 1 < args.length) {
+      result.pnpm = args[++i];
+    } else if (!arg.startsWith('--') && !result.directory) {
+      result.directory = arg;
+    }
+  }
+
+  if (!result.directory) {
+    console.error('Error: Please provide a directory path');
+    showUsage();
+    process.exit(1);
+  }
+
+  return result;
+}
+
+/**
+ * Display usage information
+ */
+function showUsage() {
+  console.log(`
+Usage: bump_engine <directory_path> [options]
+
+Options:
+  --node <version>  Set Node.js version
+  --pnpm <version>  Set PNPM version
+
+Examples:
+  bump_engine . --node 22
+  bump_engine . --pnpm 10
+  bump_engine . --node 22 --pnpm 10
+  `);
+}
+
+// Main execution
+function main() {
+  const args = parseArgs();
+
+  if (!args.node && !args.pnpm) {
+    console.error('Error: Please provide at least one version to update (--node or --pnpm)');
+    showUsage();
+    process.exit(1);
+  }
+
+  bumpEngineVersions(args.directory, {
+    node: args.node,
+    pnpm: args.pnpm
+  });
+}
+
+main();
